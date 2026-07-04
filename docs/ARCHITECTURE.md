@@ -24,7 +24,7 @@ Each sub-repo has its own history, branches, and CI; the master repo pins submod
 | Frontend | React 19 + Vite | **5175** (`server.port` in vite.config.ts must match BE CORS) | SPA |
 | Backend | Spring Boot 3.5.5 + MyBatis | 8080 | REST + STOMP WebSocket, single auth authority |
 | AI server | Python 3.12, FastAPI + LangChain + LangGraph | 8000 | Grading worker + chatbot; never publicly exposed (docker network + BE only) |
-| Ollama | Docker | 11434 | LLM runtime signed into **Ollama Cloud** (`OLLAMA_API_KEY`): grading/chatbot use `-cloud` models executing on ollama.com hardware through the same local API; small local models remain the offline fallback |
+| Ollama | **existing WSL install** (not containerized; WSL2 forwards `localhost:11434`) | 11434 | LLM runtime signed into **Ollama Cloud** (`OLLAMA_API_KEY`): grading/chatbot use `-cloud` models executing on ollama.com hardware through the same local API; small local models remain the offline fallback. From a container use `host.docker.internal:11434` |
 | PostgreSQL | Docker | 5432 | Relational system of record |
 | MongoDB | Docker | 27017 | Append-heavy documents |
 | Redis | Docker | 6379 | Cache, realtime state, leaderboards |
@@ -84,7 +84,7 @@ AI server endpoints: `POST /v1/chat` (SSE), `POST /v1/grade`, `GET /health`, `GE
 
 ## Dev infrastructure
 
-- `infra/docker-compose.yml`: postgres, mongo, redis, rabbitmq (stomp + management plugins via `enabled_plugins` file), minio (+ bucket-init), mailhog, ollama — all with healthchecks.
+- `infra/docker-compose.yml`: postgres, mongo, redis, rabbitmq (stomp + management plugins via `enabled_plugins` file), minio (+ bucket-init), mailhog — all with healthchecks. Ollama runs natively in WSL (not in compose).
 - `infra/judge0/docker-compose.yml`: stock Judge0 CE (isolated stack).
 - BE / FE / AI server run on the host during dev for hot reload.
 - Root `.env` feeds compose + Spring (`spring.config.import=optional:file:.env[.properties]`) + FastAPI settings. See `infra/.env.example`.
