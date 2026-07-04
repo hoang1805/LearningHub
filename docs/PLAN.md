@@ -38,7 +38,7 @@ LearningHub is a learning platform for students, teachers, and admins: a social 
 - `spring.config.import=optional:file:.env[.properties]`; `.env` gitignored; **rotate the committed JWT secret**
 
 **P0-3 — docker-compose dev stack (`infra/`)**
-- `docker-compose.yml`: postgres 16 (+volume), mongo 7 (+volume), redis 7, rabbitmq 4 (mount `enabled_plugins` = `[rabbitmq_management,rabbitmq_stomp].`), minio + one-shot `mc` bucket-init container, mailhog, ollama (+model volume); healthchecks on all
+- `docker-compose.yml`: postgres 16 (+volume), mongo 7 (+volume), redis 7, rabbitmq 4 (mount `enabled_plugins` = `[rabbitmq_management,rabbitmq_stomp].`), minio + one-shot `mc` bucket-init container, mailhog; healthchecks on all. Ollama = existing WSL install (localhost:11434), not containerized
 - `infra/judge0/docker-compose.yml` (stock CE) + `infra/README.md` run guide
 
 **P0-4 — Flyway + Postgres schema**

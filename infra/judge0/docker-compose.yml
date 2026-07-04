@@ -1,0 +1,73 @@
+# Judge0 CE — code execution sandbox for LearningHub code questions.
+# Stock CE topology (server + workers + ITS OWN postgres/redis — do not
+# share these with the main LearningHub stack).
+# Heavy stack: start it only when working on code questions.
+#   docker compose -f infra/judge0/docker-compose.yml up -d
+# Before first start: change the passwords in judge0.conf.
+#
+# NOTE (Windows/WSL2): Judge0's isolate sandbox requires cgroup v1.
+# If submissions hang in "Processing", add to %UserProfile%\.wslconfig:
+#   [wsl2]
+#   kernelCommandLine = systemd.unified_cgroup_hierarchy=0 cgroup_no_v1=none
+# then `wsl --shutdown` and restart Docker Desktop.
+
+name: learninghub-judge0
+
+x-logging: &default-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: 100m
+
+services:
+  server:
+    image: judge0/judge0:1.13.1
+    container_name: lh-judge0-server
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    ports:
+      - "2358:2358"
+    privileged: true
+    <<: *default-logging
+    restart: always
+    depends_on:
+      - db
+      - redis
+
+  workers:
+    image: judge0/judge0:1.13.1
+    container_name: lh-judge0-workers
+    command: ["./scripts/workers"]
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    privileged: true
+    <<: *default-logging
+    restart: always
+    depends_on:
+      - db
+      - redis
+
+  db:
+    image: postgres:16-alpine
+    container_name: lh-judge0-db
+    env_file: judge0.conf
+    volumes:
+      - judge0_pg_data:/var/lib/postgresql/data
+    <<: *default-logging
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: lh-judge0-redis
+    command:
+      [
+        "bash",
+        "-c",
+        'docker-entrypoint.sh --appendonly no --requirepass "$$REDIS_PASSWORD"',
+      ]
+    env_file: judge0.conf
+    <<: *default-logging
+    restart: always
+
+volumes:
+  judge0_pg_data:
