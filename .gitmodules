@@ -1,0 +1,6 @@
+[submodule "LearningHubBackend"]
+	path = LearningHubBackend
+	url = ./LearningHubBackend
+[submodule "LearningHubFE"]
+	path = LearningHubFE
+	url = ./LearningHubFE
