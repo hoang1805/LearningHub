@@ -1,6 +1,6 @@
 [submodule "LearningHubBackend"]
 	path = LearningHubBackend
-	url = ./LearningHubBackend
+	url = git@github.com:hoang1805/LearningHubBackend.git
 [submodule "LearningHubFE"]
 	path = LearningHubFE
-	url = ./LearningHubFE
+	url = git@github.com:hoang1805/LearningHubFrontend.git
