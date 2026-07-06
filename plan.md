@@ -6,6 +6,8 @@ LearningHub is a personal-project learning platform for students, teachers, and 
 
 **What exists today:**
 - `LearningHubBackend/` — Spring Boot 3.5.5, Java 21, **MySQL + Spring Data JPA** (both to be replaced), JWT-in-cookies auth with single-active-session fingerprinting, Bucket4j throttling. Implemented: auth (login/register/logout/refresh), users, groups (members/invitations/requests/token-join), posts/comments/votes. Consistent pattern per aggregate: `XxxService` + `XxxQuery` + `XxxReader` + `XxxListener` + `XxxACL`; `BaseResponse{success,message,data,code}` always HTTP 200; DTOs `<Entity>Release`/`<Entity>ReleaseCompact` via `Releasable<T,C>`; Long ids + epoch-millis timestamps. Has its own `.git` (kept).
+
+> **Update (2026-07-06):** the backend has since been refactored to a **standard Spring Boot layered layout** (`controller/ · service/ + service/impl/ · repository/<store>/ (sql, solr, mongo…) · model/<role>/ (sql, solr, request, response…) · mapper/ · security/authorization/ …`). The per-aggregate `Query/Reader/Listener/ACL` pattern, `Release`/`Releasable` DTO naming, and `AppContext` are **retired**; authorization now uses `hasPermission(...)` + `PermissionPolicy` beans. Current rules live in [docs/CONVENTIONS.md](docs/CONVENTIONS.md). References to the old pattern in the sections below are historical plan text.
 - `LearningHubFE/` — React 19 + Vite 7 + TS strict, **MUI v7** (themed, primary `#2463eb`) + Tailwind v4, Redux Toolkit, axios with refresh interceptor. Only login flow exists; `ProtectedRoutes`/`MainLayout` scaffolded but unused.
 
 **Decisions locked:** PostgreSQL + MongoDB + Redis · **MyBatis (not JPA)** for the relational layer · keep MUI v7 · Judge0 CE self-hosted for code execution · Python AI server (FastAPI + Ollama + LangChain + LangGraph) · **master repo + sub-repos structure** · plan/design docs live in `LearningHub/docs/` · build order: Foundation → Social → Exams → AI → Admin.
@@ -128,13 +130,13 @@ BE dependency changes: **remove** `spring-boot-starter-data-jpa`, `spring-boot-s
 
 ### MyBatis ground rules (→ CONVENTIONS.md)
 - **Flyway owns the schema** (MyBatis has no DDL generation): `V{n}__desc.sql`, applied on boot.
-- Mapper interfaces in `repositories/<aggregate>/` (keeping the existing package role), **XML mappers** in `resources/mappers/<aggregate>/*.xml` for anything beyond trivial CRUD; annotations allowed for one-liners.
-- Models become plain POJOs (strip JPA annotations, keep Lombok + `Releasable`); enums map as `VARCHAR` via default `EnumTypeHandler`.
+- MyBatis `@Mapper` interfaces (`XxxRepository`) in `repository/sql/`, **XML mappers** in `resources/mapper/*.xml` for anything beyond trivial CRUD; annotations allowed for one-liners.
+- Persistence models are plain POJOs in `model/sql/` (Lombok only, no JPA annotations); enums map as `VARCHAR` via default `EnumTypeHandler`.
 - **TypeHandlers** replace JPA converters: `JsonbMapTypeHandler` (`Map<String,Object>` ↔ JSONB), `JsonbLongListTypeHandler` (`List<Long>` ↔ JSONB), `StringArrayTypeHandler` (tags).
 - Identity ids via `useGeneratedKeys="true" keyProperty="id"`; UUID (Token) generated in code with existing `UuidUtil.v7()`.
 - Timestamps: a MyBatis `Interceptor` auto-fills `created_at` on insert and `updated_at` on update (fixes bug 6 uniformly).
 - Pagination: keyset (cursor) SQL, no offset paging, no PageHelper.
-- The `XxxQuery` classes keep their role — they wrap mappers instead of JpaRepositories, so services/ACLs don't change shape.
+- No `XxxQuery` wrapper classes — service impls call the `XxxRepository` MyBatis interfaces directly.
 
 ---
 
@@ -215,12 +217,12 @@ Weights stored per-event in `contribution_events.weight` (tunable without breaki
 
 ## 5. Conventions (→ `docs/CONVENTIONS.md`)
 
-**BE keep:** BaseResponse always-200 wrapper · `api/<area>/v1` paths · snake_case DTOs · `<Entity>Release`/`ReleaseCompact` via Releasable · Service/Query/Reader/Listener/ACL per aggregate (Query wraps MyBatis mappers) · AppContext · Long ids, epoch millis.
+**BE keep:** BaseResponse always-200 wrapper · `api/<area>/v1` paths · snake_case payloads · standard layered packages (`controller/ · service/ + service/impl/ · repository/<store>/ · model/<role>/ · mapper/`) · authorization via `@PreAuthorize("hasPermission(#target, 'ACTION')")` + `PermissionPolicy` beans (`security/authorization/`) · MapStruct for model↔payload · `@CurrentUser` → `CustomUserDetails` (id, username, fullName, email, roles) · Long ids, epoch millis.
 
 **BE change:**
 - **JPA → MyBatis** per §2 ground rules; **Flyway owns the schema** (`V{n}__desc.sql`)
 - Timestamps auto-filled by MyBatis interceptor (fixes bug 6)
-- Bean Validation on new request DTOs (shape checks); Readers keep domain rules only
+- Bean Validation on new request DTOs (shape checks); domain rules live in the service impls
 - Secrets → gitignored `.env` + placeholders; rotate committed JWT secret; ship `.env.example`
 - springdoc-openapi, `/swagger-ui` dev-profile only
 - Tests: JUnit 5 + Testcontainers (PG/Mongo/Redis)
@@ -290,21 +292,21 @@ Weights stored per-event in `contribution_events.weight` (tunable without breaki
 **P0-10 — Mongo + Redis wiring**
 - pom: `spring-boot-starter-data-mongodb`, `spring-boot-starter-data-redis`
 - `configs/RedisConfig`: `RedisTemplate<String,Object>` with `GenericJackson2JsonRedisSerializer` + `StringRedisTemplate`
-- `repositories/mongo/` package (`@EnableMongoRepositories`); `commons/models/BaseDocument` (`@Id String id`, epoch-millis `createdAt/updatedAt`)
+- `repository/mongo/` package (`@EnableMongoRepositories`); `model/mongo/BaseDocument` (`@Id String id`, epoch-millis `createdAt/updatedAt`)
 - Health indicators exposed via Actuator
 
 **P0-11 — File service (MinIO)**
 - Flyway `V2__files.sql` (`files`, `attachments`); `models/StoredFile`, `models/Attachment` + `FileMapper`, `AttachmentMapper`
-- `configs/MinioConfig` (`@Bean MinioClient`); `services/file/{FileService, FileQuery, FileReader, FileACL}`
+- `config/MinioConfig` (`@Bean MinioClient`); `service/FileService` + `service/impl/FileServiceImpl` (+ a `FilePermissionPolicy` in `security/authorization/` if permission checks are needed)
 - `controllers/FileController`: `POST /api/file/v1/upload` (`MultipartFile`, mime whitelist, `spring.servlet.multipart.max-file-size`) · `GET /api/file/v1/{id}` → presigned URL (`GetPresignedObjectUrlArgs`) · `DELETE /api/file/v1/{id}`
 
 **P0-12 — `GET /api/user/v1/me`**
-- `UserController.getMe()` via `AppContext.getUserId()` → `UserRelease` (FE cookie-auth prerequisite)
+- `UserController.getMe()` via `@CurrentUser CustomUserDetails` → `UserInformation` (FE cookie-auth prerequisite)
 
 **P0-13 — STOMP + AMQP infra BE**
 - pom: `spring-boot-starter-websocket`, `spring-boot-starter-amqp`
 - `configs/WebSocketConfig implements WebSocketMessageBrokerConfigurer` (`@EnableWebSocketMessageBroker`): `addEndpoint("/ws").setAllowedOrigins(app.client.url)` · `enableStompBrokerRelay("/topic","/queue")` → RabbitMQ 61613 · `setApplicationDestinationPrefixes("/app")` · user destinations
-- `configs/filters/WsAuthChannelInterceptor implements ChannelInterceptor` (`preSend`): CONNECT → authenticate from `access_token` cookie; SUBSCRIBE → destination ACL check
+- `security/WsAuthChannelInterceptor implements ChannelInterceptor` (`preSend`): CONNECT → authenticate from `access_token` cookie; SUBSCRIBE → destination ACL check
 - `configs/RabbitConfig`: `@Bean DirectExchange grading`, queues `grading.code.jobs/dlq` + `grading.ai.jobs/dlq` with `x-dead-letter-exchange` args, `Jackson2JsonMessageConverter`, publisher confirms
 - Smoke test: echo message to `/user/queue/notifications`
 
@@ -321,7 +323,7 @@ Weights stored per-event in `contribution_events.weight` (tunable without breaki
 - `npm i react-hook-form zod @hookform/resolvers`; `RegisterForm` with `zodResolver`; route `/register` → existing `POST /api/auth/v1/register`
 
 **P0-17 — Forgot-password BE**
-- pom: `spring-boot-starter-mail`; `services/mail/MailService` (`JavaMailSender`, `@Async`)
+- pom: `spring-boot-starter-mail`; `service/MailService` + `service/impl/MailServiceImpl` (`JavaMailSender`, `@Async`)
 - `POST /api/auth/v1/forgot-password` {email} (always-200 to prevent user enumeration; Token `Action.FORGET_PASSWORD`, 30-min expiry) · `POST /api/auth/v1/reset-password` {token, new_password}; add to public matchers in `SecurityConfig`
 
 **P0-18 — FE forgot/reset pages** (`/forgot-password`, `/reset-password?token=`)

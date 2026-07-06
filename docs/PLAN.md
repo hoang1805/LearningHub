@@ -10,6 +10,8 @@ LearningHub is a learning platform for students, teachers, and admins: a social 
 - `LearningHubBackend/` — Spring Boot 3.5.5, Java 21, MySQL + Spring Data JPA (both being replaced), JWT-in-cookies auth with single-active-session fingerprinting, Bucket4j throttling. Implemented: auth, users, groups (members/invitations/requests/token-join), posts/comments/votes.
 - `LearningHubFE/` — React 19 + Vite 7 + TS strict, MUI v7 (themed) + Tailwind v4, Redux Toolkit, axios with refresh interceptor. Only the login flow exists.
 
+> **Update (2026-07-06):** the backend has since been refactored to a **standard Spring Boot layered layout** (`controller/ · service/ + service/impl/ · repository/<store>/ (sql, solr, mongo…) · model/<role>/ (sql, solr, request, response…) · mapper/ · security/authorization/ …`). The old per-aggregate `Query/Reader/Listener/ACL` pattern, `Release`/`Releasable` DTO naming, and `AppContext` are **retired**; authorization now uses `hasPermission(...)` + `PermissionPolicy` beans. Current rules live in [CONVENTIONS.md](CONVENTIONS.md). Old-pattern references in completed tasks below are historical plan text.
+
 **Locked decisions:** PostgreSQL + MongoDB + Redis · **MyBatis** (not JPA) · MUI v7 · Judge0 CE self-hosted · **RabbitMQ** for grading queues + STOMP broker relay · Python AI server (FastAPI + LangChain + LangGraph) on **Ollama Cloud** models · master repo + sub-repos (submodules) · build order **Foundation → Social → Exams → AI → Admin**.
 
 **Known bugs fixed during Foundation:**
@@ -75,19 +77,19 @@ LearningHub is a learning platform for students, teachers, and admins: a social 
 **P0-10 — Mongo + Redis wiring**
 - pom: `spring-boot-starter-data-mongodb`, `spring-boot-starter-data-redis`
 - `configs/RedisConfig`: `RedisTemplate<String,Object>` (`GenericJackson2JsonRedisSerializer`) + `StringRedisTemplate`
-- `repositories/mongo/` (`@EnableMongoRepositories`); `commons/models/BaseDocument` (`@Id String id`, epoch-millis timestamps); health indicators
+- `repository/mongo/` (`@EnableMongoRepositories`); `model/mongo/BaseDocument` (`@Id String id`, epoch-millis timestamps); health indicators
 
 **P0-11 — File service (MinIO)**
 - Flyway `V2__files.sql` (`files`, `attachments`); `models/StoredFile`, `models/Attachment` + mappers
-- `configs/MinioConfig` (`@Bean MinioClient`); `services/file/{FileService, FileQuery, FileReader, FileACL}`
+- `config/MinioConfig` (`@Bean MinioClient`); `service/FileService` + `service/impl/FileServiceImpl` (+ a `FilePermissionPolicy` in `security/authorization/` if permission checks are needed)
 - `POST /api/file/v1/upload` (`MultipartFile`, mime whitelist, size limit) · `GET /api/file/v1/{id}` → presigned URL · `DELETE /api/file/v1/{id}`
 
-**P0-12 — `GET /api/user/v1/me`** — `UserController.getMe()` via `AppContext.getUserId()` → `UserRelease` (FE cookie-auth prerequisite)
+**P0-12 — `GET /api/user/v1/me`** — `UserController.getMe()` via `@CurrentUser CustomUserDetails` → `UserInformation` (FE cookie-auth prerequisite)
 
 **P0-13 — STOMP + AMQP infra BE**
 - pom: `spring-boot-starter-websocket`, `spring-boot-starter-amqp`
 - `configs/WebSocketConfig implements WebSocketMessageBrokerConfigurer` (`@EnableWebSocketMessageBroker`): `addEndpoint("/ws").setAllowedOrigins(app.client.url)` · `enableStompBrokerRelay("/topic","/queue")` → RabbitMQ 61613 · `setApplicationDestinationPrefixes("/app")`
-- `configs/filters/WsAuthChannelInterceptor implements ChannelInterceptor` (`preSend`): CONNECT → auth from `access_token` cookie; SUBSCRIBE → destination ACL
+- `security/WsAuthChannelInterceptor implements ChannelInterceptor` (`preSend`): CONNECT → auth from `access_token` cookie; SUBSCRIBE → destination ACL
 - `configs/RabbitConfig`: `@Bean DirectExchange grading`, queues `grading.code.jobs/dlq` + `grading.ai.jobs/dlq` with `x-dead-letter-exchange` args, `Jackson2JsonMessageConverter`, publisher confirms
 - Smoke test: echo to `/user/queue/notifications`
 
@@ -101,7 +103,7 @@ LearningHub is a learning platform for students, teachers, and admins: a social 
 **P0-16 — FE Register page** — `npm i react-hook-form zod @hookform/resolvers`; `RegisterForm` (zodResolver); route `/register` → existing `POST /api/auth/v1/register`
 
 **P0-17 — Forgot-password BE**
-- pom: `spring-boot-starter-mail`; `services/mail/MailService` (`JavaMailSender`, `@Async`)
+- pom: `spring-boot-starter-mail`; `service/MailService` + `service/impl/MailServiceImpl` (`JavaMailSender`, `@Async`)
 - `POST /api/auth/v1/forgot-password` {email} (always-200 to prevent enumeration; Token `Action.FORGET_PASSWORD`, 30-min expiry) · `POST /api/auth/v1/reset-password` {token, new_password}; add to public matchers
 
 **P0-18 — FE forgot/reset pages** (`/forgot-password`, `/reset-password?token=`)
