@@ -8,7 +8,7 @@ Everything lives under `com.example.learninghub`, packaged **by layer** (not by 
 
 ```
 com.example.learninghub
-├── annotation/      custom annotations (@CurrentUser, @StrongPassword, @HexColor, matches/…)
+├── annotation/      custom annotations (@CurrentUser, @RequireRole, @StrongPassword, @HexColor, matches/…)
 ├── aspect/          AOP aspects (LoggingAspect)
 ├── config/          @Configuration classes (SecurityConfig, WebConfig, SolrConfig, AsyncConfig, …)
 │   └── mybatis/     MyBatis infra: AuditInterceptor + JSONB/UUID TypeHandlers
@@ -49,6 +49,9 @@ Request flow: **Controller → Service interface → ServiceImpl → Repository 
   - Object checks: `@PreAuthorize("hasPermission(#post, 'EDIT')")`. `DomainPermissionEvaluator` routes the check to the `PermissionPolicy<T>` bean whose `targetType()` matches the target; one policy class per domain type (`PostPermissionPolicy`, `CommentPermissionPolicy`, `UserPermissionPolicy`, …) with its actions in a matching enum (`PostPermission`, …).
   - Pure role checks: `@PreAuthorize("hasRole('ADMIN')")` — no policy class.
   - Adding authorization for a new domain type = one new `PermissionPolicy` bean; nothing else changes (OCP). Never reintroduce SpEL bean-name calls (`@postAcl.canEdit(...)`).
+- **Controller pre-checks** (both run BEFORE the handler body; never hand-roll them inside methods):
+  - *Roles*: gate endpoints (or whole controllers, e.g. `AdminController`) with the typed meta-annotation `@RequireRole(Role.ADMIN)` — it expands to `@PreAuthorize("hasRole('…')")` via the `AnnotationTemplateExpressionDefaults` bean. Token roles are hierarchical (ADMIN carries TEACHER + STUDENT), so `@RequireRole(Role.TEACHER)` admits admins. No `if (!user.hasRole(...)) return FORBIDDEN` blocks.
+  - *Input*: `@Valid @RequestBody` for payloads; constraint annotations directly on `@PathVariable`/`@RequestParam` (`@Positive Long id`, `@NotEmpty List<Long> ids`) — Spring's built-in method validation rejects bad params before the handler runs. All failures (`MethodArgumentNotValidException`, `HandlerMethodValidationException`, `ConstraintViolationException`, `AccessDeniedException`) are mapped centrally by `GlobalExceptionHandler` into `BaseResponse.error`.
 - **Payload models**: request models in `model/request/<area>/` with snake_case `@JsonProperty`; response models in `model/response/<area>/` (e.g. `UserInformation` full / `UserCompact` summary). Model ↔ payload conversion is MapStruct's job (`mapper/`), never hand-rolled in services.
 - **Identity**: the authenticated principal is an immutable `CustomUserDetails` (`security/`) carrying `id`, `username`, `fullName`, `email` and raw `roles` (no `ROLE_` prefix — the prefix exists only in `getAuthorities()`); use `hasRole(Role.ADMIN)` for checks in code. Built via `CustomUserDetails.from(User)` at login and from JWT claims (`userId`, `fullName`, `email`, `roles`) per request; injected into controllers via `@CurrentUser`.
 - **IDs & time**: `BIGINT` identity ids; epoch-millis `createdAt`/`updatedAt`.
