@@ -50,6 +50,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # Standalone mode (cores via CoreAdmin) — NOT SolrCloud; matches SolrConfig.
+  # configset-init.sh seeds the _default configset into SOLR_HOME/configsets so
+  # the app's CoreAdmin CREATE (configSet=_default) can find it.
+  solr:
+    image: solr:9
+    container_name: lh-solr
+    ports:
+      - "8983:8983"
+    volumes:
+      - solr_data:/var/solr
+      - ./solr/configset-init.sh:/docker-entrypoint-initdb.d/configset-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:8983/solr/admin/cores?action=STATUS' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   rabbitmq:
     image: rabbitmq:4-management-alpine
     container_name: lh-rabbitmq
@@ -112,5 +130,6 @@ services:
 volumes:
   pg_data:
   mongo_data:
+  solr_data:
   rabbitmq_data:
   minio_data:
